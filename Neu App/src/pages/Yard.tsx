@@ -340,14 +340,37 @@ export default function Yard({ lang }: { lang: Lang }) {
 }
 
 
-  async function unassign(bay: Bay) {
+ async function unassign(bay: Bay) {
+  const prev = bays;
+  setBays(p => p.map(b => b.id===bay.id ? ({
+    ...b, truck_id: null, truck: null, operators: [],
+    status: "FREI", assigned_at: null, started_at: null, ended_at: null
+  }) : b));
+
+  try {
     for (const name of bay.operators || []) {
       await supabase.from("ops_presence").upsert({
-        name,
-        status: FREE,
-        updated_at: new Date().toISOString(),
+        name, status: FREE, updated_at: new Date().toISOString(),
       });
     }
+    const { error } = await supabase
+      .from("bays")
+      .update({
+        truck_id: null,
+        operators: [],
+        status: "FREI",
+        assigned_at: null,
+        started_at: null,
+        ended_at: null,
+      })
+      .eq("id", bay.id);
+    if (error) throw error;
+  } catch (e:any) {
+    alert("Błąd odpięcia: " + (e.message || e));
+    setBays(prev);
+  }
+}
+
     await supabase
       .from("bays")
       .update({
@@ -361,22 +384,39 @@ export default function Yard({ lang }: { lang: Lang }) {
       .eq("id", bay.id);
   }
 
-  async function cycle(bay: Bay, dir: "next" | "prev") {
-    const ns = dir === "next" ? next(bay.status) : prev(bay.status);
+async function cycle(bay: Bay, dir: "next" | "prev") {
+  const ns = dir === "next" ? next(bay.status) : prev(bay.status);
+  const nowIso = new Date().toISOString();
+  const prevState = bays;
 
+  // lokalna zmiana natychmiast
+  setBays(p => p.map(b => {
+    if (b.id !== bay.id) return b;
+    if (b.status !== "START" && ns === "START")
+      return { ...b, status: ns, started_at: nowIso, ended_at: null };
+    if (b.status !== "ENDE" && ns === "ENDE")
+      return { ...b, status: ns, ended_at: nowIso };
+    if (b.truck_id && b.status === "ENDE" && ns === "FREI")
+      return { ...b, status: "FREI", truck_id: null, truck: null, operators: [], assigned_at: null, started_at: null, ended_at: null };
+    return { ...b, status: ns };
+  }));
+
+  try {
     if (bay.status !== "START" && ns === "START") {
-      await supabase
+      const { error } = await supabase
         .from("bays")
-        .update({ status: ns, started_at: new Date().toISOString(), ended_at: null })
+        .update({ status: ns, started_at: nowIso, ended_at: null })
         .eq("id", bay.id);
+      if (error) throw error;
       return;
     }
 
     if (bay.status !== "ENDE" && ns === "ENDE") {
-      await supabase
+      const { error } = await supabase
         .from("bays")
-        .update({ status: ns, ended_at: new Date().toISOString() })
+        .update({ status: ns, ended_at: nowIso })
         .eq("id", bay.id);
+      if (error) throw error;
       return;
     }
 
@@ -384,31 +424,47 @@ export default function Yard({ lang }: { lang: Lang }) {
       const st = bay.started_at ? +new Date(bay.started_at) : undefined;
       const en = bay.ended_at ? +new Date(bay.ended_at) : undefined;
       const duration = st && en ? Math.max(0, en - st) : null;
-
       const truck = bay.truck!;
-      await supabase.from("done_trucks").insert({
-        id: truck.id,
-        plate: truck.plate,
-        dept: truck.dept,
-        forwarder: truck.forwarder,
-        goods: truck.goods,
-        cnt: truck.cnt,
-        eta: truck.eta,
-        notes: truck.notes,
-        completed_at: new Date().toISOString(),
-        bay_id: bay.id,
-        bay_name: bay.name,
-        duration_ms: duration,
-        operators: bay.operators,
-      });
+      // done + operatorzy wolni + usunięcie ciężarówki
+      const [d1, d2] = await Promise.all([
+        supabase.from("done_trucks").insert({
+          id: truck.id, plate: truck.plate, dept: truck.dept,
+          forwarder: truck.forwarder, goods: truck.goods, cnt: truck.cnt,
+          eta: truck.eta, notes: truck.notes,
+          completed_at: new Date().toISOString(),
+          bay_id: bay.id, bay_name: bay.name,
+          duration_ms: duration, operators: bay.operators,
+        }),
+        supabase.from("trucks").delete().eq("id", truck.id)
+      ]);
+      if (d1.error) throw d1.error;
+      if (d2.error) throw d2.error;
 
       for (const name of bay.operators || []) {
         await supabase.from("ops_presence").upsert({
-          name,
-          status: FREE,
-          updated_at: new Date().toISOString(),
+          name, status: FREE, updated_at: new Date().toISOString(),
         });
       }
+
+      const { error } = await supabase
+        .from("bays")
+        .update({
+          truck_id: null, operators: [], status: "FREI",
+          assigned_at: null, started_at: null, ended_at: null,
+        })
+        .eq("id", bay.id);
+      if (error) throw error;
+      return;
+    }
+
+    const { error } = await supabase.from("bays").update({ status: ns }).eq("id", bay.id);
+    if (error) throw error;
+  } catch (e:any) {
+    alert("Błąd zmiany statusu: " + (e.message || e));
+    setBays(prevState); // rollback
+  }
+}
+
       await supabase.from("trucks").delete().eq("id", truck.id);
       await supabase
         .from("bays")
