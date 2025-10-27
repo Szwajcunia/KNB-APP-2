@@ -2,21 +2,26 @@ import { Outlet } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import { useLang, i18n } from './i18n'
 import { supabase } from './supabaseClient'
-import { useEffect, useState } from 'react'
+// App.tsx (fragment u góry pliku)
+import React, { useMemo, useState, useEffect } from "react";
+// ...
 
-export default function App(){
-  const [lang, , t] = useLang()
-  const [user,setUser] = useState<any>(null)
+// helper do bezpiecznego pobrania języka
+const normalizeLang = (v: string | null): "de" | "pl" => (v === "de" || v === "pl" ? v : "de");
 
-  useEffect(()=>{
-    const get = async()=>{
-      const { data: { user } } = await supabase.auth.getUser()
-      setUser(user)
-    }
-    get()
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e,s)=> setUser(s?.user ?? null))
-    return ()=>subscription.unsubscribe()
-  },[])
+export default function App() {
+  const [lang, _setLang] = useState<"de" | "pl">(
+    normalizeLang(localStorage.getItem("lang"))
+  );
+
+  // zawsze zapisujemy 'de'/'pl' (małe litery)
+  const setLang = (v: "de" | "pl") => {
+    _setLang(v);
+    localStorage.setItem("lang", v);
+  };
+
+  // ... reszta App
+}
 
   async function signIn(){
     const email = window.prompt('E-Mail:')
