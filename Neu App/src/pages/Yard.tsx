@@ -63,6 +63,7 @@ const prev = (s: BayState) => (s === "FREI" ? "ENDE" : ORDER[ORDER.indexOf(s) - 
 
 const i18n = {
   de: {
+    hdr: "Plätze & LKW",
     ops: "Operatorstatus",
     name: "Name",
     func: "Funktion",
@@ -75,7 +76,6 @@ const i18n = {
     noOps: "Keine Operatoren. Bitte anmelden.",
     noAssign: "Keine Zuweisung",
     ready: "Bereit",
-    bays: "Plätze",
     avail: "Verfügbare LKW",
     search: "Suchen…",
     done: "Bereits beladen",
@@ -101,9 +101,11 @@ const i18n = {
     confirmAssign: (b: string) => `Zuweisung bestätigen — ${b}`,
     confirmMove: (a: string, b: string) => `Verschieben — ${a} → ${b}`,
     sla: "SLA",
-    assign: "Zuweisen",
+    addManual: "Manuell hinzufügen",
+    dragHandle: "Ziehen",
   },
   pl: {
+    hdr: "Place i ciężarówki",
     ops: "Status operatorów",
     name: "Imię",
     func: "Funkcja",
@@ -116,7 +118,6 @@ const i18n = {
     noOps: "Brak operatorów. Zaloguj operatora.",
     noAssign: "Brak przypisania",
     ready: "Gotowe",
-    bays: "Place",
     avail: "Dostępne ciężarówki",
     search: "Szukaj…",
     done: "Już załadowane",
@@ -142,7 +143,8 @@ const i18n = {
     confirmAssign: (b: string) => `Potwierdź przydział — ${b}`,
     confirmMove: (a: string, b: string) => `Przenieś — ${a} → ${b}`,
     sla: "SLA",
-    assign: "Przypisz",
+    addManual: "Dodaj ręcznie",
+    dragHandle: "Przeciągnij",
   },
 } as const;
 
@@ -178,7 +180,6 @@ export default function Yard({ lang }: { lang: Lang }) {
   const [ops, setOps] = useState<OpPresence[]>([]);
   const [search, setSearch] = useState("");
 
-  // modal wyboru/do potwierdzeń
   type Confirm =
     | { open: false }
     | { open: true; kind: "assign"; toBay: number; truck: Truck }
@@ -186,12 +187,11 @@ export default function Yard({ lang }: { lang: Lang }) {
   const [confirm, setConfirm] = useState<Confirm>({ open: false });
   const [confirmOps, setConfirmOps] = useState<string[]>([]);
 
-  // modal ręcznego przypisania (przycisk w pustym placu)
   const [pickBay, setPickBay] = useState<Bay | null>(null);
   const [pickTruckId, setPickTruckId] = useState<string>("");
   const [pickOps, setPickOps] = useState<string[]>([]);
 
-  // ---------- fetch / init ----------
+  // --- init / fetch ---
   async function ensureBays() {
     const { data: existing } = await supabase.from("bays").select("id").limit(1);
     if (!existing || existing.length === 0) {
@@ -282,7 +282,7 @@ export default function Yard({ lang }: { lang: Lang }) {
     };
   }, []);
 
-  // ---------- derive ----------
+  // --- derive ---
   const assignedTrucks = new Set(bays.filter((b) => b.truck_id).map((b) => b.truck_id!));
   const available = useMemo(() => {
     const list = trucks.filter((t) => !assignedTrucks.has(t.id));
@@ -301,7 +301,7 @@ export default function Yard({ lang }: { lang: Lang }) {
     [ops, FREE]
   );
 
-  // ---------- actions ----------
+  // --- actions ---
   async function assignTruck(bay: Bay, truck: Truck, operators: string[]) {
     const chosen = operators.slice(0, 3).filter((n) => freeOps.includes(n));
     await supabase
@@ -420,7 +420,6 @@ export default function Yard({ lang }: { lang: Lang }) {
     });
   }
 
-  // demo add truck (pomocne do testów)
   async function addDemoTruck() {
     const id = String(Date.now());
     await supabase.from("trucks").insert({
@@ -435,7 +434,7 @@ export default function Yard({ lang }: { lang: Lang }) {
     });
   }
 
-  // drag&drop
+  // --- drag&drop: TYLKO na „rączce” ---
   function onDragAvail(e: React.DragEvent, id: string) {
     e.dataTransfer.setData("text/plain", JSON.stringify({ kind: "available", id }));
   }
@@ -450,7 +449,7 @@ export default function Yard({ lang }: { lang: Lang }) {
         const tk = trucks.find((x) => x.id === p.id);
         if (!tk) return;
         setConfirm({ open: true, kind: "assign", toBay: to, truck: tk });
-        setConfirmOps([]); // dyspozytor wybierze operatorów
+        setConfirmOps([]);
       } else if (p.kind === "bay") {
         const src = bays.find((b) => b.id === p.from);
         if (!src || !src.truck_id || p.from === to) return;
@@ -464,7 +463,6 @@ export default function Yard({ lang }: { lang: Lang }) {
     const dst = bays.find((b) => b.id === to);
     if (!src || !dst || !src.truck_id) return;
 
-    // jeśli dst zajęty – zamiana, jeśli wolny – przeniesienie
     const srcPayload = dst.truck_id
       ? {
           truck_id: dst.truck_id,
@@ -496,7 +494,6 @@ export default function Yard({ lang }: { lang: Lang }) {
     await supabase.from("bays").update(dstPayload).eq("id", to);
   }
 
-  // render helpers
   const TLABEL = (s: BayState) =>
     s === "FREI" ? t.free : s === "WARTET" ? t.waiting : s === "START" ? t.started : t.ended;
   const statusClass = (s: BayState) =>
@@ -512,8 +509,14 @@ export default function Yard({ lang }: { lang: Lang }) {
     setPickOps((p) => (p.includes(name) ? p.filter((n) => n !== name) : p.length >= 3 ? p : [...p, name]));
   }
 
+  // ---------- UI ----------
   return (
     <div className="container">
+      {/* Główny nagłówek sekcji */}
+      <div className="page-header">
+        <h2>{t.hdr}</h2>
+      </div>
+
       {/* Operatorzy */}
       <div className="card">
         <div className="card-header">
@@ -551,7 +554,13 @@ export default function Yard({ lang }: { lang: Lang }) {
                       <td>{o.func === "unload" ? t.unload : t.load}</td>
                       <td>{o.status}</td>
                       <td>
-                        <button className="btn" onClick={() => setOpBreak(o.name, !(o.status === PAUSE))}>
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpBreak(o.name, !(o.status === PAUSE));
+                          }}
+                        >
                           {o.status === PAUSE ? t.toFree : t.pause}
                         </button>
                       </td>
@@ -564,7 +573,7 @@ export default function Yard({ lang }: { lang: Lang }) {
         </div>
       </div>
 
-      {/* Place */}
+      {/* Place: siatka kart; drop aktywny na body, nie na headerze */}
       <div className="grid-bays">
         {bays.map((b) => {
           const meta = statusClass(b.status);
@@ -573,25 +582,31 @@ export default function Yard({ lang }: { lang: Lang }) {
             (b.status === "WARTET" && b.assigned_at && Date.now() - +new Date(b.assigned_at) > 30 * 60 * 1000);
 
           return (
-            <div
-              key={b.id}
-              className="card"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDropBay(e, b.id)}
-              draggable={!!b.truck_id}
-              onDragStart={(e) => b.truck_id && onDragBay(e, b.id, b.truck_id)}
-            >
+            <div key={b.id} className="card">
               <div className={`card-header ${b.truck_id ? meta.wrap : ""}`}>
                 <b>{b.name}</b>
                 <span className={meta.badge}>
                   {TLABEL(b.status)} {warn && <span style={{ color: "#dc2626", marginLeft: 6 }}>⚠ {t.sla}</span>}
                 </span>
               </div>
-              <div className="card-body">
+
+              <div
+                className="card-body"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => onDropBay(e, b.id)}
+              >
                 {!b.truck ? (
                   <div className="center-muted">
                     <div className="mb-8">{t.noAssign}</div>
-                    <button className="btn" onClick={() => { setPickBay(b); setPickTruckId(""); setPickOps([]); }}>
+                    <button
+                      className="btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPickBay(b);
+                        setPickTruckId("");
+                        setPickOps([]);
+                      }}
+                    >
                       {t.assignTruck}
                     </button>
                   </div>
@@ -600,14 +615,34 @@ export default function Yard({ lang }: { lang: Lang }) {
                     <div className="row justify-between items-center mb-8">
                       <div className="fw-600">{b.truck?.plate}</div>
                       <div className="row gap-8">
-                        <button className="btn" onClick={() => unassign(b)} title="x">
+                        {/* Rączka do przeciągania zajętego placu */}
+                        <button
+                          className="btn ghost drag-handle"
+                          draggable
+                          onDragStart={(e) => onDragBay(e, b.id, b.truck_id!)}
+                          onClick={(e) => e.preventDefault()}
+                          title={t.dragHandle}
+                          aria-label={t.dragHandle}
+                        >
+                          ⠿
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            unassign(b);
+                          }}
+                          title="x"
+                        >
                           ✖
                         </button>
                       </div>
                     </div>
+
                     <div className="muted mb-8 fs-12">
                       {t.operators}: {b.operators.length ? b.operators.join(", ") : "—"}
                     </div>
+
                     <div className="fs-12">
                       {b.truck?.dept && (
                         <div>
@@ -646,10 +681,10 @@ export default function Yard({ lang }: { lang: Lang }) {
                         {t.state} <b>{TLABEL(b.status)}</b>
                       </div>
                       <div className="row gap-8">
-                        <button className="btn" onClick={() => cycle(b, "prev")}>
+                        <button className="btn" onClick={(e) => { e.stopPropagation(); cycle(b, "prev"); }}>
                           ←
                         </button>
-                        <button className="btn" onClick={() => cycle(b, "next")}>
+                        <button className="btn" onClick={(e) => { e.stopPropagation(); cycle(b, "next"); }}>
                           →
                         </button>
                       </div>
@@ -669,8 +704,8 @@ export default function Yard({ lang }: { lang: Lang }) {
             {t.avail} ({available.length})
           </span>
           <div className="row gap-8 items-center">
-            <button className="btn" onClick={addDemoTruck}>
-              {lang === "de" ? "Manuell hinzufügen" : "Dodaj ręcznie"}
+            <button className="btn" onClick={(e) => { e.stopPropagation(); addDemoTruck(); }}>
+              {t.addManual}
             </button>
             <input
               className="input"
@@ -686,12 +721,7 @@ export default function Yard({ lang }: { lang: Lang }) {
           ) : (
             <div className="col gap-10">
               {available.map((tk) => (
-                <div
-                  key={tk.id}
-                  className="card p-10"
-                  draggable
-                  onDragStart={(e) => onDragAvail(e, tk.id)}
-                >
+                <div key={tk.id} className="card p-10">
                   <div className="row justify-between items-center">
                     <div>
                       <div className="fw-600">{tk.plate}</div>
@@ -700,7 +730,17 @@ export default function Yard({ lang }: { lang: Lang }) {
                         {tk.forwarder || "—"} {tk.goods ? "• " + tk.goods : ""} {tk.eta ? "• ETA " + tk.eta : ""}
                       </div>
                     </div>
-                    <span className="badge">{t.ready}</span>
+                    {/* Rączka do przeciągania ciężarówki z listy */}
+                    <button
+                      className="btn ghost drag-handle"
+                      draggable
+                      onDragStart={(e) => onDragAvail(e, tk.id)}
+                      onClick={(e) => e.preventDefault()}
+                      title={t.dragHandle}
+                      aria-label={t.dragHandle}
+                    >
+                      ⠿
+                    </button>
                   </div>
                 </div>
               ))}
@@ -752,7 +792,7 @@ export default function Yard({ lang }: { lang: Lang }) {
               ✕
             </button>
             <div className="card-title mb-8">
-              {t.assign} – {pickBay.name}
+              {t.assignTruck} – {pickBay.name}
             </div>
 
             <div className="mb-8">
