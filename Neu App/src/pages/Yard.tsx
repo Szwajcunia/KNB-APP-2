@@ -302,9 +302,18 @@ export default function Yard({ lang }: { lang: Lang }) {
   );
 
   // --- actions ---
-  async function assignTruck(bay: Bay, truck: Truck, operators: string[]) {
-    const chosen = operators.slice(0, 3).filter((n) => freeOps.includes(n));
-    await supabase
+ async function assignTruck(bay: Bay, truck: Truck, operators: string[]) {
+  const chosen = operators.slice(0, 3).filter((n) => freeOps.includes(n));
+  // OPTYMISTYCZNIE: lokalna zmiana
+  const prev = bays;
+  setBays(p => p.map(b => b.id===bay.id ? {
+    ...b, truck_id: truck.id, truck, operators: chosen,
+    status: "WARTET", assigned_at: new Date().toISOString(),
+    started_at: null, ended_at: null
+  } : b));
+
+  try {
+    const { error } = await supabase
       .from("bays")
       .update({
         truck_id: truck.id,
@@ -315,6 +324,7 @@ export default function Yard({ lang }: { lang: Lang }) {
         ended_at: null,
       })
       .eq("id", bay.id);
+    if (error) throw error;
 
     for (const name of chosen) {
       await supabase.from("ops_presence").upsert({
@@ -323,7 +333,12 @@ export default function Yard({ lang }: { lang: Lang }) {
         updated_at: new Date().toISOString(),
       });
     }
+  } catch (e:any) {
+    alert("Błąd przypisania: " + (e.message || e));
+    setBays(prev); // rollback
   }
+}
+
 
   async function unassign(bay: Bay) {
     for (const name of bay.operators || []) {
