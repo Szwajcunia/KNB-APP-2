@@ -1,3 +1,4 @@
+// src/components/Navbar.tsx
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -14,7 +15,7 @@ const i18n = {
     tab_picking: "Komisjonowanie",
     tab_admin: "Admin",
   },
-};
+} as const;
 
 export default function Navbar({
   lang,
@@ -25,12 +26,11 @@ export default function Navbar({
 }) {
   const { pathname } = useLocation();
 
+  // ⬇⬇⬇ kluczowa linijka – fallback na DE jeśli `lang` z jakiegoś powodu jest inny
+  const L = i18n[lang] ?? i18n.de;
+
   const item = (to: string, label: string) => (
-    <Link
-      key={to}
-      to={to}
-      className={`tab ${pathname === to ? "active" : ""}`}
-    >
+    <Link key={to} to={to} className={`tab ${pathname === to ? "active" : ""}`}>
       {label}
     </Link>
   );
@@ -38,10 +38,10 @@ export default function Navbar({
   return (
     <div className="navbar">
       <div className="tab-group">
-        {item("/", i18n[lang].tab_yard)}
-        {item("/planning", i18n[lang].tab_planning)}
-        {item("/picking", i18n[lang].tab_picking)}
-        {item("/admin", i18n[lang].tab_admin)}
+        {item("/", L.tab_yard)}
+        {item("/planning", L.tab_planning)}
+        {item("/picking", L.tab_picking)}
+        {item("/admin", L.tab_admin)}
         <button
           className="tab"
           onClick={() => setLang(lang === "de" ? "pl" : "de")}
