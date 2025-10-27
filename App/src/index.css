@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --muted: 246 5% 96%;
+  --muted-foreground: 220 8% 46%;
+}
+
+.bg-muted\/30 { background-color: hsl(var(--muted) / .3); }
+.text-muted-foreground { color: hsl(var(--muted-foreground)); }

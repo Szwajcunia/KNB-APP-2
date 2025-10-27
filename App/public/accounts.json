@@ -1,0 +1,15 @@
+{
+  "dispatchers": [
+    { "name": "Jakub",  "password": "Versand123" },
+    { "name": "Dawid",  "password": "Versand123" },
+    { "name": "Arek",   "password": "Versand123" },
+    { "name": "Marcel", "password": "Versand123" }
+  ],
+  "operators": [
+    { "name": "Marcin", "role": "versand",      "function": "load",   "pin": "1234" },
+    { "name": "Anna",   "role": "wareneingang", "function": "unload", "pin": "2345" },
+    { "name": "Tomek",  "role": "versand",      "function": "load",   "pin": "3456" },
+    { "name": "Kasia",  "role": "wareneingang", "function": "unload", "pin": "4567" },
+    { "name": "Marek",  "role": "mobel",        "function": "load",   "pin": "5678" }
+  ]
+}
