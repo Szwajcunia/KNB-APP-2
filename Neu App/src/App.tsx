@@ -1,27 +1,41 @@
-import { Outlet } from 'react-router-dom'
-import Navbar from './components/Navbar'
-import { useLang, i18n } from './i18n'
-import { supabase } from './supabaseClient'
-// App.tsx (fragment u góry pliku)
-import React, { useMemo, useState, useEffect } from "react";
-// ...
+// src/App.tsx
+import React, { useState } from "react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Navbar from "./components/Navbar";
+// importuj swoje ekrany:
+import Yard from "./pages/Yard";
+import Planning from "./pages/Planning";
+import Picking from "./pages/Picking";
+import Admin from "./pages/Admin";
 
-// helper do bezpiecznego pobrania języka
-const normalizeLang = (v: string | null): "de" | "pl" => (v === "de" || v === "pl" ? v : "de");
+// ✅ helper – JEDNA para {}
+const normalizeLang = (v: string | null): "de" | "pl" =>
+  v === "de" || v === "pl" ? v : "de";
 
+// ✅ komponent – otwierająca { po deklaracji i JEDNA zamykająca } PRZED export default
 export default function App() {
-  const [lang, _setLang] = useState<"de" | "pl">(
+  const [langState, setLangState] = useState<"de" | "pl">(
     normalizeLang(localStorage.getItem("lang"))
   );
 
-  // zawsze zapisujemy 'de'/'pl' (małe litery)
   const setLang = (v: "de" | "pl") => {
-    _setLang(v);
+    setLangState(v);
     localStorage.setItem("lang", v);
   };
 
-  // ... reszta App
+  return (
+    <BrowserRouter>
+      <Navbar lang={langState} setLang={setLang} />
+      <Routes>
+        <Route path="/" element={<Yard lang={langState} />} />
+        <Route path="/planning" element={<Planning lang={langState} />} />
+        <Route path="/picking" element={<Picking lang={langState} />} />
+        <Route path="/admin" element={<Admin lang={langState} />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
+
 
   async function signIn(){
     const email = window.prompt('E-Mail:')
