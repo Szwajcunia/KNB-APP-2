@@ -41,7 +41,7 @@ type DoneTruck = Truck & {
 
 type OpPresence = {
   name: string;
-  status: string; // "Frei" | "Pause" | "Lädt …"
+  status: string; // "Frei" | "Pause" | "Lädt …" | "Wolny" | "Przerwa" | "Ładuje …"
   func?: "load" | "unload";
   updated_at?: string;
 };
@@ -191,8 +191,8 @@ export default function Yard({ lang }: { lang: Lang }) {
   const [pickTruckId, setPickTruckId] = useState<string>("");
   const [pickOps, setPickOps] = useState<string[]>([]);
 
-  // --- init / fetch ---
-  async function ensureBays() {
+  // === init / fetch ===
+  const ensureBays = async () => {
     const { data: existing } = await supabase.from("bays").select("id").limit(1);
     if (!existing || existing.length === 0) {
       await supabase.from("bays").insert(
@@ -208,9 +208,9 @@ export default function Yard({ lang }: { lang: Lang }) {
         }))
       );
     }
-  }
+  };
 
-  async function fetchBays() {
+  const fetchBays = async () => {
     const { data, error } = await supabase
       .from("bays")
       .select("*, truck:trucks(*)")
@@ -224,32 +224,32 @@ export default function Yard({ lang }: { lang: Lang }) {
         }))
       );
     }
-  }
+  };
 
-  async function fetchTrucks() {
+  const fetchTrucks = async () => {
     const { data, error } = await supabase
       .from("trucks")
       .select("*")
       .order("created_at", { ascending: false });
     if (!error && data) setTrucks(data);
-  }
+  };
 
-  async function fetchDone() {
+  const fetchDone = async () => {
     const { data, error } = await supabase
       .from("done_trucks")
       .select("*")
       .order("completed_at", { ascending: false })
       .limit(50);
     if (!error && data) setDone(data as any);
-  }
+  };
 
-  async function fetchOps() {
+  const fetchOps = async () => {
     const { data, error } = await supabase
       .from("ops_presence")
       .select("*")
       .order("updated_at", { ascending: false });
     if (!error && data) setOps(data as any);
-  }
+  };
 
   useEffect(() => {
     (async () => {
@@ -282,8 +282,9 @@ export default function Yard({ lang }: { lang: Lang }) {
     };
   }, []);
 
-  // --- derive ---
-  const assignedTrucks = new Set(bays.filter((b) => b.truck_id).map((b) => b.truck_id!));
+  // === derive ===
+  const assignedTrucks = useMemo(() => new Set(bays.filter((b) => b.truck_id).map((b) => b.truck_id!)), [bays]);
+
   const available = useMemo(() => {
     const list = trucks.filter((t) => !assignedTrucks.has(t.id));
     if (!search.trim()) return list;
@@ -301,172 +302,83 @@ export default function Yard({ lang }: { lang: Lang }) {
     [ops, FREE]
   );
 
-  // --- actions ---
- async function assignTruck(bay: Bay, truck: Truck, operators: string[]) {
-  const chosen = operators.slice(0, 3).filter((n) => freeOps.includes(n));
-  // OPTYMISTYCZNIE: lokalna zmiana
-  const prev = bays;
-  setBays(p => p.map(b => b.id===bay.id ? {
-    ...b, truck_id: truck.id, truck, operators: chosen,
-    status: "WARTET", assigned_at: new Date().toISOString(),
-    started_at: null, ended_at: null
-  } : b));
+  // === actions (wszystko async!) ===
+  const assignTruck = async (bay: Bay, truck: Truck, operators: string[]) => {
+    const chosen = operators.slice(0, 3).filter((n) => freeOps.includes(n));
 
-  try {
-    const { error } = await supabase
-      .from("bays")
-      .update({
-        truck_id: truck.id,
-        operators: chosen,
-        status: "WARTET",
-        assigned_at: new Date().toISOString(),
-        started_at: null,
-        ended_at: null,
-      })
-      .eq("id", bay.id);
-    if (error) throw error;
+    const prev = bays;
+    setBays((p) =>
+      p.map((b) =>
+        b.id === bay.id
+          ? {
+              ...b,
+              truck_id: truck.id,
+              truck,
+              operators: chosen,
+              status: "WARTET",
+              assigned_at: new Date().toISOString(),
+              started_at: null,
+              ended_at: null,
+            }
+          : b
+      )
+    );
 
-    for (const name of chosen) {
-      await supabase.from("ops_presence").upsert({
-        name,
-        status: `${LOAD_PREFIX} ${bay.name}`,
-        updated_at: new Date().toISOString(),
-      });
-    }
-  } catch (e:any) {
-    alert("Błąd przypisania: " + (e.message || e));
-    setBays(prev); // rollback
-  }
-}
-
-
- async function unassign(bay: Bay) {
-  const prev = bays;
-  setBays(p => p.map(b => b.id===bay.id ? ({
-    ...b, truck_id: null, truck: null, operators: [],
-    status: "FREI", assigned_at: null, started_at: null, ended_at: null
-  }) : b));
-
-  try {
-    for (const name of bay.operators || []) {
-      await supabase.from("ops_presence").upsert({
-        name, status: FREE, updated_at: new Date().toISOString(),
-      });
-    }
-    const { error } = await supabase
-      .from("bays")
-      .update({
-        truck_id: null,
-        operators: [],
-        status: "FREI",
-        assigned_at: null,
-        started_at: null,
-        ended_at: null,
-      })
-      .eq("id", bay.id);
-    if (error) throw error;
-  } catch (e:any) {
-    alert("Błąd odpięcia: " + (e.message || e));
-    setBays(prev);
-  }
-}
-
-    await supabase
-      .from("bays")
-      .update({
-        truck_id: null,
-        operators: [],
-        status: "FREI",
-        assigned_at: null,
-        started_at: null,
-        ended_at: null,
-      })
-      .eq("id", bay.id);
-  }
-
-async function cycle(bay: Bay, dir: "next" | "prev") {
-  const ns = dir === "next" ? next(bay.status) : prev(bay.status);
-  const nowIso = new Date().toISOString();
-  const prevState = bays;
-
-  // lokalna zmiana natychmiast
-  setBays(p => p.map(b => {
-    if (b.id !== bay.id) return b;
-    if (b.status !== "START" && ns === "START")
-      return { ...b, status: ns, started_at: nowIso, ended_at: null };
-    if (b.status !== "ENDE" && ns === "ENDE")
-      return { ...b, status: ns, ended_at: nowIso };
-    if (b.truck_id && b.status === "ENDE" && ns === "FREI")
-      return { ...b, status: "FREI", truck_id: null, truck: null, operators: [], assigned_at: null, started_at: null, ended_at: null };
-    return { ...b, status: ns };
-  }));
-
-  try {
-    if (bay.status !== "START" && ns === "START") {
-      const { error } = await supabase
-        .from("bays")
-        .update({ status: ns, started_at: nowIso, ended_at: null })
-        .eq("id", bay.id);
-      if (error) throw error;
-      return;
-    }
-
-    if (bay.status !== "ENDE" && ns === "ENDE") {
-      const { error } = await supabase
-        .from("bays")
-        .update({ status: ns, ended_at: nowIso })
-        .eq("id", bay.id);
-      if (error) throw error;
-      return;
-    }
-
-    if (bay.truck_id && bay.status === "ENDE" && ns === "FREI") {
-      const st = bay.started_at ? +new Date(bay.started_at) : undefined;
-      const en = bay.ended_at ? +new Date(bay.ended_at) : undefined;
-      const duration = st && en ? Math.max(0, en - st) : null;
-      const truck = bay.truck!;
-      // done + operatorzy wolni + usunięcie ciężarówki
-      const [d1, d2] = await Promise.all([
-        supabase.from("done_trucks").insert({
-          id: truck.id, plate: truck.plate, dept: truck.dept,
-          forwarder: truck.forwarder, goods: truck.goods, cnt: truck.cnt,
-          eta: truck.eta, notes: truck.notes,
-          completed_at: new Date().toISOString(),
-          bay_id: bay.id, bay_name: bay.name,
-          duration_ms: duration, operators: bay.operators,
-        }),
-        supabase.from("trucks").delete().eq("id", truck.id)
-      ]);
-      if (d1.error) throw d1.error;
-      if (d2.error) throw d2.error;
-
-      for (const name of bay.operators || []) {
-        await supabase.from("ops_presence").upsert({
-          name, status: FREE, updated_at: new Date().toISOString(),
-        });
-      }
-
+    try {
       const { error } = await supabase
         .from("bays")
         .update({
-          truck_id: null, operators: [], status: "FREI",
-          assigned_at: null, started_at: null, ended_at: null,
+          truck_id: truck.id,
+          operators: chosen,
+          status: "WARTET",
+          assigned_at: new Date().toISOString(),
+          started_at: null,
+          ended_at: null,
         })
         .eq("id", bay.id);
       if (error) throw error;
-      return;
+
+      for (const name of chosen) {
+        await supabase.from("ops_presence").upsert({
+          name,
+          status: `${LOAD_PREFIX} ${bay.name}`,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } catch (e: any) {
+      alert("Błąd przypisania: " + (e.message || e));
+      setBays(prev); // rollback
     }
+  };
 
-    const { error } = await supabase.from("bays").update({ status: ns }).eq("id", bay.id);
-    if (error) throw error;
-  } catch (e:any) {
-    alert("Błąd zmiany statusu: " + (e.message || e));
-    setBays(prevState); // rollback
-  }
-}
+  const unassign = async (bay: Bay) => {
+    const prev = bays;
+    setBays((p) =>
+      p.map((b) =>
+        b.id === bay.id
+          ? {
+              ...b,
+              truck_id: null,
+              truck: null,
+              operators: [],
+              status: "FREI",
+              assigned_at: null,
+              started_at: null,
+              ended_at: null,
+            }
+          : b
+      )
+    );
 
-      await supabase.from("trucks").delete().eq("id", truck.id);
-      await supabase
+    try {
+      for (const name of bay.operators || []) {
+        await supabase.from("ops_presence").upsert({
+          name,
+          status: FREE,
+          updated_at: new Date().toISOString(),
+        });
+      }
+      const { error } = await supabase
         .from("bays")
         .update({
           truck_id: null,
@@ -477,21 +389,126 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
           ended_at: null,
         })
         .eq("id", bay.id);
-      return;
+      if (error) throw error;
+    } catch (e: any) {
+      alert("Błąd odpięcia: " + (e.message || e));
+      setBays(prev);
     }
+  };
 
-    await supabase.from("bays").update({ status: ns }).eq("id", bay.id);
-  }
+  const cycle = async (bay: Bay, dir: "next" | "prev") => {
+    const ns = dir === "next" ? next(bay.status) : prev(bay.status);
+    const nowIso = new Date().toISOString();
+    const prevState = bays;
 
-  async function setOpBreak(name: string, toPause: boolean) {
+    setBays((p) =>
+      p.map((b) => {
+        if (b.id !== bay.id) return b;
+        if (b.status !== "START" && ns === "START")
+          return { ...b, status: ns, started_at: nowIso, ended_at: null };
+        if (b.status !== "ENDE" && ns === "ENDE")
+          return { ...b, status: ns, ended_at: nowIso };
+        if (b.truck_id && b.status === "ENDE" && ns === "FREI")
+          return {
+            ...b,
+            status: "FREI",
+            truck_id: null,
+            truck: null,
+            operators: [],
+            assigned_at: null,
+            started_at: null,
+            ended_at: null,
+          };
+        return { ...b, status: ns };
+      })
+    );
+
+    try {
+      if (bay.status !== "START" && ns === "START") {
+        const { error } = await supabase
+          .from("bays")
+          .update({ status: ns, started_at: nowIso, ended_at: null })
+          .eq("id", bay.id);
+        if (error) throw error;
+        return;
+      }
+
+      if (bay.status !== "ENDE" && ns === "ENDE") {
+        const { error } = await supabase
+          .from("bays")
+          .update({ status: ns, ended_at: nowIso })
+          .eq("id", bay.id);
+        if (error) throw error;
+        return;
+      }
+
+      if (bay.truck_id && bay.status === "ENDE" && ns === "FREI") {
+        const st = bay.started_at ? +new Date(bay.started_at) : undefined;
+        const en = bay.ended_at ? +new Date(bay.ended_at) : undefined;
+        const duration = st && en ? Math.max(0, en - st) : null;
+        const truck = bay.truck!;
+
+        const [d1, d2] = await Promise.all([
+          supabase.from("done_trucks").insert({
+            id: truck.id,
+            plate: truck.plate,
+            dept: truck.dept,
+            forwarder: truck.forwarder,
+            goods: truck.goods,
+            cnt: truck.cnt,
+            eta: truck.eta,
+            notes: truck.notes,
+            completed_at: new Date().toISOString(),
+            bay_id: bay.id,
+            bay_name: bay.name,
+            duration_ms: duration,
+            operators: bay.operators,
+          }),
+          supabase.from("trucks").delete().eq("id", truck.id),
+        ]);
+        if (d1.error) throw d1.error;
+        if (d2.error) throw d2.error;
+
+        for (const name of bay.operators || []) {
+          await supabase.from("ops_presence").upsert({
+            name,
+            status: FREE,
+            updated_at: new Date().toISOString(),
+          });
+        }
+
+        const { error } = await supabase
+          .from("bays")
+          .update({
+            truck_id: null,
+            operators: [],
+            status: "FREI",
+            assigned_at: null,
+            started_at: null,
+            ended_at: null,
+          })
+          .eq("id", bay.id);
+        if (error) throw error;
+        return;
+      }
+
+      const { error } = await supabase.from("bays").update({ status: ns }).eq("id", bay.id);
+      if (error) throw error;
+    } catch (e: any) {
+      alert("Błąd zmiany statusu: " + (e.message || e));
+      setBays(prevState);
+    }
+  };
+
+  const setOpBreak = async (name: string, toPause: boolean) => {
     await supabase.from("ops_presence").upsert({
       name,
       status: toPause ? PAUSE : FREE,
       updated_at: new Date().toISOString(),
     });
-  }
+  };
 
-  async function addDemoTruck() {
+  const addDemoTruck = async () => {
     const id = String(Date.now());
     await supabase.from("trucks").insert({
       id,
@@ -503,16 +520,16 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
       eta: "12:30",
       notes: "",
     });
-  }
+  };
 
-  // --- drag&drop: TYLKO na „rączce” ---
-  function onDragAvail(e: React.DragEvent, id: string) {
+  // === drag/drop tylko na rączkach ===
+  const onDragAvail = (e: React.DragEvent, id: string) => {
     e.dataTransfer.setData("text/plain", JSON.stringify({ kind: "available", id }));
-  }
-  function onDragBay(e: React.DragEvent, from: number, id: string) {
+  };
+  const onDragBay = (e: React.DragEvent, from: number, id: string) => {
     e.dataTransfer.setData("text/plain", JSON.stringify({ kind: "bay", from, id }));
-  }
-  function onDropBay(e: React.DragEvent, to: number) {
+  };
+  const onDropBay = (e: React.DragEvent, to: number) => {
     e.preventDefault();
     try {
       const p = JSON.parse(e.dataTransfer.getData("text/plain"));
@@ -527,9 +544,9 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
         setConfirm({ open: true, kind: "move", from: p.from, to, truck: src.truck! });
       }
     } catch {}
-  }
+  };
 
-  async function move(from: number, to: number) {
+  const move = async (from: number, to: number) => {
     const src = bays.find((b) => b.id === from);
     const dst = bays.find((b) => b.id === to);
     if (!src || !dst || !src.truck_id) return;
@@ -563,10 +580,11 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
 
     await supabase.from("bays").update(srcPayload).eq("id", from);
     await supabase.from("bays").update(dstPayload).eq("id", to);
-  }
+  };
 
   const TLABEL = (s: BayState) =>
     s === "FREI" ? t.free : s === "WARTET" ? t.waiting : s === "START" ? t.started : t.ended;
+
   const statusClass = (s: BayState) =>
     s === "FREI"
       ? { badge: "badge text-free", wrap: "" }
@@ -576,14 +594,12 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
       ? { badge: "badge text-start", wrap: "bg-start" }
       : { badge: "badge text-end", wrap: "bg-end" };
 
-  function togglePickOp(name: string) {
+  const togglePickOp = (name: string) =>
     setPickOps((p) => (p.includes(name) ? p.filter((n) => n !== name) : p.length >= 3 ? p : [...p, name]));
-  }
 
-  // ---------- UI ----------
+  // === UI ===
   return (
     <div className="container">
-      {/* Główny nagłówek sekcji */}
       <div className="page-header">
         <h2>{t.hdr}</h2>
       </div>
@@ -631,6 +647,7 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
                             e.stopPropagation();
                             setOpBreak(o.name, !(o.status === PAUSE));
                           }}
+                          onMouseDown={(e) => e.stopPropagation()}
                         >
                           {o.status === PAUSE ? t.toFree : t.pause}
                         </button>
@@ -644,7 +661,7 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
         </div>
       </div>
 
-      {/* Place: siatka kart; drop aktywny na body, nie na headerze */}
+      {/* Place */}
       <div className="grid-bays">
         {bays.map((b) => {
           const meta = statusClass(b.status);
@@ -677,6 +694,7 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
                         setPickTruckId("");
                         setPickOps([]);
                       }}
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
                       {t.assignTruck}
                     </button>
@@ -686,12 +704,12 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
                     <div className="row justify-between items-center mb-8">
                       <div className="fw-600">{b.truck?.plate}</div>
                       <div className="row gap-8">
-                        {/* Rączka do przeciągania zajętego placu */}
                         <button
                           className="btn ghost drag-handle"
                           draggable
                           onDragStart={(e) => onDragBay(e, b.id, b.truck_id!)}
                           onClick={(e) => e.preventDefault()}
+                          onMouseDown={(e) => e.stopPropagation()}
                           title={t.dragHandle}
                           aria-label={t.dragHandle}
                         >
@@ -703,6 +721,7 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
                             e.stopPropagation();
                             unassign(b);
                           }}
+                          onMouseDown={(e) => e.stopPropagation()}
                           title="x"
                         >
                           ✖
@@ -752,10 +771,24 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
                         {t.state} <b>{TLABEL(b.status)}</b>
                       </div>
                       <div className="row gap-8">
-                        <button className="btn" onClick={(e) => { e.stopPropagation(); cycle(b, "prev"); }}>
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cycle(b, "prev");
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
                           ←
                         </button>
-                        <button className="btn" onClick={(e) => { e.stopPropagation(); cycle(b, "next"); }}>
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cycle(b, "next");
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
                           →
                         </button>
                       </div>
@@ -775,7 +808,14 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
             {t.avail} ({available.length})
           </span>
           <div className="row gap-8 items-center">
-            <button className="btn" onClick={(e) => { e.stopPropagation(); addDemoTruck(); }}>
+            <button
+              className="btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                addDemoTruck();
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
               {t.addManual}
             </button>
             <input
@@ -801,12 +841,12 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
                         {tk.forwarder || "—"} {tk.goods ? "• " + tk.goods : ""} {tk.eta ? "• ETA " + tk.eta : ""}
                       </div>
                     </div>
-                    {/* Rączka do przeciągania ciężarówki z listy */}
                     <button
                       className="btn ghost drag-handle"
                       draggable
                       onDragStart={(e) => onDragAvail(e, tk.id)}
                       onClick={(e) => e.preventDefault()}
+                      onMouseDown={(e) => e.stopPropagation()}
                       title={t.dragHandle}
                       aria-label={t.dragHandle}
                     >
@@ -868,11 +908,7 @@ async function cycle(bay: Bay, dir: "next" | "prev") {
 
             <div className="mb-8">
               <div className="muted fs-12 mb-6">{t.pickTruck}</div>
-              <select
-                className="select"
-                value={pickTruckId}
-                onChange={(e) => setPickTruckId(e.target.value)}
-              >
+              <select className="select" value={pickTruckId} onChange={(e) => setPickTruckId(e.target.value)}>
                 <option value="">{lang === "de" ? "— auswählen —" : "— wybierz —"}</option>
                 {available.map((tk) => (
                   <option key={tk.id} value={tk.id}>
